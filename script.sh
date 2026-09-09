@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 USER_NAME="$1"
+SCRIPT_NAME=$(basename "$0")
 
 if [ -z "$USER_NAME" ]; then
-	echo "Использование script.sh имя_пользователя" >&2
+	echo "Использование $SCRIPT_NAME имя_пользователя" >&2
 	exit 1;
 fi
 
