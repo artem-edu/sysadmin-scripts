@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -e
 
-install_docker() {
-	if ! sudo -v &> /dev/null; then
-		echo "Ошибка: Для установки docker необходимы права sudo!" >&2
-		exit 1;
-	fi
+USER_NAME="Ivan"
+CONTAINER_NAME="sysadmin-app"
+IMAGE_NAME="sysadmin-script"
+TAG="1.0"
 
+install_docker() {
 	sudo apt update
 	sudo apt install -y docker.io docker-compose-v2
 	sudo usermod -aG docker "$USER"
@@ -21,17 +21,51 @@ install_docker() {
 	fi
 }
 
+install_nginx() {
+	if !command -v nginx &> /dev/null; then
+		echo "Nginx не найден."
+		echo "Установка nginx..."
+	
+		sudo apt update -y >/dev/null 2>&1
+		sudo apt install -y nginx >/dev/null 2>&1
+		sudo rm -f /etc/nginx/sites-enabled/default
+	fi
+
+	echo "Применения конфигурация ngix для ${CONTAINER_NAME}"
+
+	sudo tee /etc/nginx/sites-available/"${CONTAINER_NAME}" > /dev/null <<EOF
+server {
+	listen 80;
+	server_name _;
+	return 301 https://\$host\$request_uri;
+}
+server {
+	listen 443 ssl;
+	server_name _;
+	ssl_certificate	/etc/ssl/certs/${CONTAINER_NAME}.crt;
+	ssl_certificate_key /etc/ssl/private/${CONTAINER_NAME}.key;
+	location / {
+		proxy_pass http://127.0.0.1:8080;
+	}
+}
+EOF
+	sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+		-keyout /etc/ssl/private/"${CONTAINER_NAME}".key \
+		-out /etc/ssl/certs/"${CONTAINER_NAME}".crt \
+		-subj "/CN=${CONTAINER_NAME}.local"
+
+	sudo ln -sf /etc/nginx/sites-available/"${CONTAINER_NAME}" /etc/nginx/sites-enabled/
+	sudo nginx -t && sudo systemctl reload nginx
+
+	echo "конфигурация nginx завершена"
+}
+
 if ! command -v docker &> /dev/null; then
 	echo "docker не установлен" >&2
 	echo "начинаю установку docker" >&2
 	install_docker
 	exit 0
 else
-	USER_NAME="Ivan"
-	IMAGE_NAME="sysadmin-script"
-	TAG="1.0"
-	CONTAINER_NAME="sysadmin-app"
-
 	echo "Сборка образа ${IMAGE_NAME}:${TAG}"
 	docker build -t "${IMAGE_NAME}:${TAG}" .
 
@@ -46,4 +80,7 @@ else
 		"${IMAGE_NAME}:${TAG}"
 
 	echo "Контейнер ${CONTAINER_NAME} запущен на порту 8080"
+
+	install_nginx
 fi
+
