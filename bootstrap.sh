@@ -7,8 +7,8 @@ IMAGE_NAME="sysadmin-script"
 TAG="1.0"
 
 install_docker() {
-	sudo apt update
-	sudo apt install -y docker.io docker-compose-v2
+	sudo apt update -y >/dev/null 2>&1
+	sudo apt install -y docker.io docker-compose-v2 >/dev/null 2>&1
 	sudo usermod -aG docker "$USER"
 
 	if command -v docker &> /dev/null; then
@@ -60,6 +60,35 @@ EOF
 	echo "конфигурация nginx завершена"
 }
 
+raid_lvm() {
+	echo "Сборка RAID-1"
+	sudo apt update -y >/dev/null 2>&1
+	sudo apt install -y mdadm lvm2 >/dev/null 2>&1
+	sudo mkdir -p /mnt/raid-lab && cd /mnt/raid-lab
+	sudo dd if=/dev/zero of=disk1.img bs=1M count=512
+	sudo dd if=/dev/zero of=disk2.img bs=1M count=512
+	sudo dd if=/dev/zero of=disk3.img bs=1M count=512
+
+	LOOP1=$(sudo losetup -fP --show disk1.img)
+	LOOP2=$(sudo losetup -fP --show disk2.img)
+	LOOP3=$(sudo losetup -fP --show disk3.img)
+
+	yes | sudo mdadm --create /dev/md0 --level=1 --raid-devices=2 "$LOOP1" "$LOOP2"
+	sudo mkfs.ext4 -F /dev/md0
+	sudo mkdir -p /mnt/raid && sudo mount /dev/md0 /mnt/raid
+	cat /proc/mdstat
+
+	"Настройка LVM"
+	sudo pvcreate "$LOOP3"
+	sudo vgcreate vg_data "$LOOP3"
+	sudo lvcreate -L 200M -n lv_logs vg_data
+	sudo mkfs.ext4 /dev/vg_data/lv_logs
+	sudo mkdir -p /mnt/logs && sudo mount /dev/vg_data/lv_logs /mnt/logs
+
+	echo "Результат:"
+	df -h | grep -E "raid|logs"
+}
+
 if ! command -v docker &> /dev/null; then
 	echo "docker не установлен" >&2
 	echo "начинаю установку docker" >&2
@@ -74,7 +103,7 @@ else
 
 	echo "Запуск контейнера ${CONTAINER_NAME}"
 	docker run -d \
-		-p 8080:8080 \
+		-p 127.0.0.1:8080:8080 \
 		--name sysadmin-app \
 		-e USER_NAME="$USER_NAME" \
 		"${IMAGE_NAME}:${TAG}"
@@ -82,5 +111,6 @@ else
 	echo "Контейнер ${CONTAINER_NAME} запущен на порту 8080"
 
 	install_nginx
+	raid_lvm
 fi
 
