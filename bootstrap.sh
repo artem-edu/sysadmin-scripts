@@ -89,6 +89,33 @@ raid_lvm() {
 	df -h | grep -E "raid|logs"
 }
 
+systemd_config() {
+	docker rm -f "${CONTAINER_NAME}"
+	sudo tee /etc/systemd/system/"${CONTAINER_NAME}.service" <<EOF
+[Unit]
+Description=${CONTAINER_NAME} service
+After=docker.service
+Requires=docker.service
+
+[Service]
+ExecStart=docker start -a ${CONTAINER_NAME}
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+	docker create -p 127.0.0.1:8080:8080 \
+		--name "$CONTAINER_NAME" \
+		-e USER_NAME="$USER_NAME" \
+		"${IMAGE_NAME}:${TAG}"
+
+	sudo systemctl daemon-reload
+	sudo systemctl enable "$CONTAINER_NAME"
+	sudo systemctl start "$CONTAINER_NAME"
+	sleep 3
+	sudo systemctl status "$CONTAINER_NAME"
+}
+
 if ! command -v docker &> /dev/null; then
 	echo "docker не установлен" >&2
 	echo "начинаю установку docker" >&2
@@ -104,13 +131,16 @@ else
 	echo "Запуск контейнера ${CONTAINER_NAME}"
 	docker run -d \
 		-p 127.0.0.1:8080:8080 \
-		--name sysadmin-app \
+		--name "$CONTAINER_NAME" \
 		-e USER_NAME="$USER_NAME" \
 		"${IMAGE_NAME}:${TAG}"
 
 	echo "Контейнер ${CONTAINER_NAME} запущен на порту 8080"
 
 	install_nginx
-	raid_lvm
+	#raid_lvm
+	# todo: raid_lvm при повторном запуске падает с ошибкой, так как raid массив уже создан. Нужно учесть этот момент
+	# так же нужно при запуске контейнера прокинуть том, так как при перезапуске все что в нем было удаляется
+	systemd_config
 fi
 
