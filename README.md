@@ -5,5 +5,5 @@
 Запуск скрипта
 ```bash
 chmod +x script.sh
-./script.sh userName
+USER_NAME=<userName> ./script.sh
 ```

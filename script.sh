@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-USER_NAME="${1:-}"
+USER_NAME="${USER_NAME:-}"
 SCRIPT_NAME=$(basename "$0")
 
 if [ -z "$USER_NAME" ]; then
-	echo "Ошибка: не казано имя пользователя." >&2
+	echo "Ошибка: не указана переменная окружения USER_NAME." >&2
 	echo "Использование $SCRIPT_NAME имя_пользователя" >&2
 	exit 1;
 fi
