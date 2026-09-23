@@ -17,3 +17,9 @@ docker build -t sysadmin-script .
 ```bash
 docker run -d -p 8080:8080 -e USER_NAME=<userName> --name sysadmin-app sysadmin-script
 ```
+
+## Поднятие проекта на чистой машине
+```bash
+chmod +x bootstrap.sh
+./bootstrap.sh
+```
