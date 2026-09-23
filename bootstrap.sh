@@ -11,29 +11,29 @@ install_docker() {
 	sudo apt install -y docker.io docker-compose-v2 >/dev/null 2>&1
 	sudo usermod -aG docker "$USER"
 
-	if command -v docker &> /dev/null; then
-		echo "Установка docker завершениа. $(docker --version)"
-		echo "Перезапустите скрипт"
-		echo "ВНИМАНИЕ! Перезапустите сессию терминала или выполните 'newgrp docker' вручную"
+	if command -v docker &>/dev/null; then
+		echo "== [ok] Установка docker завершена. $(docker --version) =="
+		echo "== Перезапустите скрипт =="
+		echo "== ВНИМАНИЕ! Перезапустите сессию терминала или выполните 'newgrp docker' вручную =="
 	else
-		echo "Ошибка: не удалось установить docker." >&2
+		echo "== [Ошибка]: не удалось установить docker. ==" >&2
 		exit 1
 	fi
 }
 
 install_nginx() {
-	if !command -v nginx &> /dev/null; then
-		echo "Nginx не найден."
-		echo "Установка nginx..."
-	
+	if !command -v nginx &>/dev/null; then
+		echo "== Nginx не найден. =="
+		echo "== Установка nginx. =="
+
 		sudo apt update -y >/dev/null 2>&1
 		sudo apt install -y nginx >/dev/null 2>&1
 		sudo rm -f /etc/nginx/sites-enabled/default
 	fi
 
-	echo "Применения конфигурация ngix для ${CONTAINER_NAME}"
+	echo "== Применения конфигурация nginx для ${CONTAINER_NAME} =="
 
-	sudo tee /etc/nginx/sites-available/"${CONTAINER_NAME}" > /dev/null <<EOF
+	sudo tee /etc/nginx/sites-available/"${CONTAINER_NAME}" >/dev/null <<EOF
 server {
 	listen 80;
 	server_name _;
@@ -57,35 +57,64 @@ EOF
 	sudo ln -sf /etc/nginx/sites-available/"${CONTAINER_NAME}" /etc/nginx/sites-enabled/
 	sudo nginx -t && sudo systemctl reload nginx
 
-	echo "конфигурация nginx завершена"
+	echo "== Конфигурация nginx завершена =="
 }
 
 raid_lvm() {
-	echo "Сборка RAID-1"
+	echo "== Сборка RAID-1 =="
 	sudo apt update -y >/dev/null 2>&1
-	sudo apt install -y mdadm lvm2 >/dev/null 2>&1
+	if ! command -v mdadm &>/dev/null; then
+		echo "== Установка mdadm =="
+		sudo apt install -y mdadm >/dev/null 2>&1
+	fi
+
 	sudo mkdir -p /mnt/raid-lab && cd /mnt/raid-lab
-	sudo dd if=/dev/zero of=disk1.img bs=1M count=512
-	sudo dd if=/dev/zero of=disk2.img bs=1M count=512
-	sudo dd if=/dev/zero of=disk3.img bs=1M count=512
+	[ -f disk1.img ] || sudo dd if=/dev/zero of=disk1.img bs=1M count=512
+	[ -f disk2.img ] || sudo dd if=/dev/zero of=disk2.img bs=1M count=512
+	[ -f disk3.img ] || sudo dd if=/dev/zero of=disk3.img bs=1M count=512
 
-	LOOP1=$(sudo losetup -fP --show disk1.img)
-	LOOP2=$(sudo losetup -fP --show disk2.img)
-	LOOP3=$(sudo losetup -fP --show disk3.img)
+	LOOP1=$(sudo losetup -j disk1.img | cut -d':' -f1)
+	[ -z "$LOOP1" ] && LOOP1=$(sudo losetup -fP --show disk1.img)
 
-	yes | sudo mdadm --create /dev/md0 --level=1 --raid-devices=2 "$LOOP1" "$LOOP2"
-	sudo mkfs.ext4 -F /dev/md0
-	sudo mkdir -p /mnt/raid && sudo mount /dev/md0 /mnt/raid
-	cat /proc/mdstat
+	LOOP2=$(sudo losetup -j disk2.img | cut -d':' -f1)
+	[ -z "$LOOP2" ] && LOOP2=$(sudo losetup -fP --show disk2.img)
 
-	"Настройка LVM"
-	sudo pvcreate "$LOOP3"
-	sudo vgcreate vg_data "$LOOP3"
-	sudo lvcreate -L 200M -n lv_logs vg_data
-	sudo mkfs.ext4 /dev/vg_data/lv_logs
-	sudo mkdir -p /mnt/logs && sudo mount /dev/vg_data/lv_logs /mnt/logs
+	LOOP3=$(sudo losetup -j disk3.img | cut -d':' -f1)
+	[ -z "$LOOP3" ] && LOOP3=$(sudo losetup -fP --show disk3.img)
 
-	echo "Результат:"
+	echo "== Проверка состояния RAID =="
+	if [ -b /dev/md0 ]; then
+		echo "== [ok] Raid массив существует =="
+	else
+		echo "== [!] RAID не найден. Пытаемся собрать существующий =="
+		if sudo mdadm --assemble --scan 2>/dev/null; then
+			echo "[ОК] Существующий RAID успешно собран."
+		else
+			echo "[!] Сборка не удалась. Создаем НОВЫЙ RAID-1..."
+			yes | sudo mdadm --create /dev/md0 --level=1 --raid-devices=2 "$LOOP1" "$LOOP2"
+			sudo mkfs.ext4 -F /dev/md0
+			sudo mkdir -p /mnt/raid && sudo mount /dev/md0 /mnt/raid
+			cat /proc/mdstat
+		fi
+	fi
+
+	echo "== Настройка LVM =="
+	if ! command -v lvm >/dev/null 2>&1; then
+		echo "== Установка lvm2 =="
+		sudo apt install -y lvm2 >/dev/null 2>&1
+	fi
+
+	if ! sudo pvs "$LOOP3" >/dev/null 2>&1; then
+		sudo pvcreate -f --yes "$LOOP3"
+		sudo vgcreate vg_data "$LOOP3"
+	fi
+
+	sudo lvs /dev/vg_data/lv_logs >/dev/null 2>&1 || sudo lvcreate -L 200M -n lv_logs vg_data
+	sudo blkid /dev/vg_data/lv_logs | grep -q 'TYPE="ext4"' || sudo mkfs.ext4 /dev/vg_data/lv_logs
+	sudo mkdir -p /mnt/logs
+	mountpoint -q /mnt/logs || sudo mount /dev/vg_data/lv_logs /mnt/logs
+
+	echo "== Результат =="
 	df -h | grep -E "raid|logs"
 }
 
@@ -116,7 +145,7 @@ EOF
 	sudo systemctl status "$CONTAINER_NAME"
 }
 
-if ! command -v docker &> /dev/null; then
+if ! command -v docker &>/dev/null; then
 	echo "docker не установлен" >&2
 	echo "начинаю установку docker" >&2
 	install_docker
@@ -138,9 +167,6 @@ else
 	echo "Контейнер ${CONTAINER_NAME} запущен на порту 8080"
 
 	install_nginx
-	#raid_lvm
-	# todo: raid_lvm при повторном запуске падает с ошибкой, так как raid массив уже создан. Нужно учесть этот момент
-	# так же нужно при запуске контейнера прокинуть том, так как при перезапуске все что в нем было удаляется
+	raid_lvm
 	systemd_config
 fi
-
