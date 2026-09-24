@@ -22,7 +22,7 @@ install_docker() {
 }
 
 install_nginx() {
-	if !command -v nginx &>/dev/null; then
+	if ! command -v nginx &>/dev/null; then
 		echo "== Nginx не найден. =="
 		echo "== Установка nginx. =="
 
